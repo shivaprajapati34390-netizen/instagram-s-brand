@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S-Brand · Instagram AI Automation</title>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #09090b; --sidebar: #0f0f12; --card: #141417; --card-hover: #19191e;
+            --border: #27272a; --text: #f4f4f5; --muted: #a1a1aa; --green: #34d399;
+            --purple: #a78bfa; --pink: #f472b6; --blue: #60a5fa; --orange: #fb923c; --danger: #f87171;
+        }
+        body { font-family: Inter, Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+        button, input, textarea, select { font-family: inherit; }
+
+        .sidebar { position: fixed; left: 0; top: 0; width: 250px; height: 100vh; background: var(--sidebar); border-right: 1px solid var(--border); padding: 22px 16px; z-index: 100; }
+        .logo { display: flex; align-items: center; gap: 12px; padding: 0 10px 28px; }
+        .logo-icon { width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, #f472b6, #a78bfa, #60a5fa); display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo h2 { font-size: 17px; }
+        .logo span { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
+        .nav-title { color: #52525b; font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 0 11px; margin: 20px 0 8px; letter-spacing: 1px; }
+        .nav-item { width: 100%; border: none; background: transparent; color: var(--muted); padding: 12px 12px; border-radius: 9px; display: flex; align-items: center; gap: 12px; cursor: pointer; text-align: left; margin-bottom: 3px; font-size: 13px; }
+        .nav-item:hover { background: var(--card-hover); color: var(--text); }
+        .nav-item.active { background: #1d1d22; color: white; }
+        .nav-icon { width: 20px; text-align: center; }
+        .status-box { position: absolute; bottom: 20px; left: 16px; right: 16px; padding: 13px; background: #121216; border: 1px solid var(--border); border-radius: 10px; }
+        .status-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+        .online { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+        .online.off { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+        .status-small { color: var(--muted); font-size: 10px; margin-top: 5px; }
+
+        .main { margin-left: 250px; min-height: 100vh; }
+        .topbar { height: 70px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 30px; background: rgba(9, 9, 11, .85); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 50; }
+        .topbar-title h1 { font-size: 19px; }
+        .topbar-title p { color: var(--muted); font-size: 11px; margin-top: 3px; }
+        .account { display: flex; align-items: center; gap: 10px; }
+        .avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #f472b6, #a78bfa); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
+        .content { padding: 30px; max-width: 1500px; }
+        .page { display: none; }
+        .page.active { display: block; }
+
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 25px; }
+        .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+        .stat-top { display: flex; justify-content: space-between; align-items: center; }
+        .stat-label { color: var(--muted); font-size: 12px; }
+        .stat-icon { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: #1d1d22; }
+        .stat-value { font-size: 28px; font-weight: 700; margin-top: 13px; }
+        .stat-change { font-size: 10px; color: var(--green); margin-top: 5px; }
+        .grid-2 { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+        .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+        .card-title { font-size: 14px; font-weight: 600; }
+        .card-subtitle { color: var(--muted); font-size: 11px; margin-top: 4px; }
+
+        .btn { border: none; border-radius: 8px; padding: 10px 15px; cursor: pointer; font-size: 12px; font-weight: 600; transition: .2s; }
+        .btn-primary { background: var(--green); color: #052e1c; }
+        .btn-primary:hover { transform: translateY(-1px); opacity: .9; }
+        .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+        .btn-secondary { background: #27272a; color: white; border: 1px solid #3f3f46; }
+        .btn-purple { background: var(--purple); color: #181026; }
+        .btn-purple:disabled { opacity: .5; cursor: not-allowed; }
+        .btn-danger { background: #3a1717; color: var(--danger); }
+
+        .form-group { margin-bottom: 16px; }
+        label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 7px; }
+        input, textarea, select { width: 100%; background: #0d0d10; color: white; border: 1px solid var(--border); border-radius: 8px; padding: 11px 12px; outline: none; font-size: 12px; }
+        input:focus, textarea:focus, select:focus { border-color: #52525b; }
+        textarea { min-height: 130px; resize: vertical; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+        .brand-list { display: grid; gap: 8px; }
+        .brand { display: flex; align-items: center; justify-content: space-between; padding: 12px; background: #101014; border: 1px solid #202024; border-radius: 9px; }
+        .brand-info { display: flex; align-items: center; gap: 10px; }
+        .brand-logo { width: 34px; height: 34px; border-radius: 8px; background: #25252a; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; flex-shrink: 0; }
+        .brand-name { font-size: 12px; font-weight: 600; }
+        .brand-domain { color: var(--muted); font-size: 10px; margin-top: 3px; }
+        .badge { padding: 4px 8px; border-radius: 20px; font-size: 9px; background: #143b2d; color: var(--green); white-space: nowrap; }
+        .badge.amber { background: #3a2a12; color: var(--orange); }
+        .badge.red { background: #3a1717; color: var(--danger); }
+
+        .activity { display: flex; gap: 12px; padding: 13px 0; border-bottom: 1px solid #202024; }
+        .activity:last-child { border-bottom: none; }
+        .activity-icon { width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px; background: #1f1f24; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .activity-icon img { width: 100%; height: 100%; object-fit: cover; }
+        .activity-text { font-size: 11px; }
+        .activity-time { color: var(--muted); font-size: 9px; margin-top: 4px; }
+
+        .post-preview { background: #0d0d10; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .post-image { height: 280px; background: linear-gradient(135deg, #242424, #101010); display: flex; align-items: center; justify-content: center; color: #71717a; font-size: 12px; }
+        .post-image img { width: 100%; height: 100%; object-fit: cover; }
+        .post-body { padding: 15px; }
+        .post-user { font-size: 12px; font-weight: 600; }
+        .post-caption { color: #d4d4d8; font-size: 11px; line-height: 1.6; margin-top: 9px; white-space: pre-wrap; }
+
+        .schedule-item { display: flex; align-items: center; gap: 15px; padding: 15px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 9px; background: #101014; }
+        .schedule-date { width: 48px; text-align: center; }
+        .schedule-day { font-size: 19px; font-weight: 700; }
+        .schedule-month { color: var(--muted); font-size: 9px; text-transform: uppercase; }
+        .schedule-info { flex: 1; }
+        .schedule-title { font-size: 12px; font-weight: 600; }
+        .schedule-time { color: var(--muted); font-size: 10px; margin-top: 4px; }
+
+        .empty { padding: 35px; text-align: center; color: var(--muted); font-size: 11px; }
+        .loading { display: inline-block; width: 14px; height: 14px; border: 2px solid #444; border-top-color: var(--green); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @media(max-width: 1000px) { .stats { grid-template-columns: repeat(2, 1fr); } .grid-2 { grid-template-columns: 1fr; } }
+        @media(max-width: 700px) {
+            .sidebar { width: 65px; padding: 15px 8px; }
+            .logo h2, .logo span, .nav-title, .nav-item span:not(.nav-icon), .status-box { display: none; }
+            .logo { justify-content: center; padding: 0 0 20px; }
+            .nav-item { justify-content: center; }
+            .main { margin-left: 65px; }
+            .content { padding: 18px; }
+            .stats { grid-template-columns: 1fr; }
+            .form-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<aside class="sidebar">
+    <div class="logo">
+        <div class="logo-icon">✦</div>
+        <div><h2>S-Brand</h2><span>Instagram Autopilot</span></div>
+    </div>
+
+    <div class="nav-title">Dashboard</div>
+    <button class="nav-item active" onclick="showPage('overview', this)"><span class="nav-icon">⌂</span><span>Overview</span></button>
+    <button class="nav-item" onclick="showPage('brands', this)"><span class="nav-icon">◈</span><span>Brand Fetcher</span></button>
+
+    <div class="nav-title">AI Tools</div>
+    <button class="nav-item" onclick="showPage('content', this)"><span class="nav-icon">✎</span><span>AI Content</span></button>
+    <button class="nav-item" onclick="showPage('images', this)"><span class="nav-icon">▧</span><span>AI Images</span></button>
+
+    <div class="nav-title">Instagram</div>
+    <button class="nav-item" onclick="showPage('publisher', this)"><span class="nav-icon">◎</span><span>Publisher</span></button>
+    <button class="nav-item" onclick="showPage('scheduler', this)"><span class="nav-icon">◷</span><span>Scheduler</span></button>
+    <button class="nav-item" onclick="showPage('activity', this)"><span class="nav-icon">☷</span><span>Activity</span></button>
+
+    <div class="status-box">
+        <div class="status-row"><span class="online" id="sidebarStatusDot"></span><span id="sidebarStatusText">Checking…</span></div>
+        <div class="status-small" id="sidebarStatusSub">Connecting to server</div>
+    </div>
+</aside>
+
+<main class="main">
+    <header class="topbar">
+        <div class="topbar-title"><h1 id="pageTitle">Overview</h1><p>S-Brand Instagram AI Automation Center</p></div>
+        <div class="account">
+            <div><div style="font-size:11px;" id="igHandle">@sbrandofficia</div><div style="font-size:9px;color:#71717a;" id="igStatusText">Checking…</div></div>
+            <div class="avatar">S</div>
+        </div>
+    </header>
+
+    <div class="content">
+
+        <!-- OVERVIEW -->
+        <section id="overview" class="page active">
+            <div class="stats">
+                <div class="stat-card"><div class="stat-top"><span class="stat-label">Posts Published</span><div class="stat-icon">◎</div></div><div class="stat-value" id="publishedCount">0</div><div class="stat-change">Auto-agent + manual</div></div>
+                <div class="stat-card"><div class="stat-top"><span class="stat-label">Scheduled</span><div class="stat-icon">◷</div></div><div class="stat-value" id="scheduledCount">0</div><div class="stat-change">Waiting to publish</div></div>
+                <div class="stat-card"><div class="stat-top"><span class="stat-label">Brands</span><div class="stat-icon">◈</div></div><div class="stat-value" id="brandCount">17</div><div class="stat-change">Live product sources</div></div>
+                <div class="stat-card"><div class="stat-top"><span class="stat-label">AI Generated</span><div class="stat-icon">✦</div></div><div class="stat-value" id="aiCount">0</div><div class="stat-change">Content + Images</div></div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Recent Activity</div><div class="card-subtitle">Real auto-agent + manual actions</div></div><button class="btn btn-secondary" onclick="showPage('activity')">View all</button></div>
+                    <div id="recentActivity"><div class="empty">Loading…</div></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">AI Agent</div><div class="card-subtitle">Runs automatically 3x/day</div></div></div>
+                    <div class="form-group" style="margin-bottom:10px;">
+                        <label>Next scheduled run</label>
+                        <div id="nextRunTime" style="font-size:16px;font-weight:600;">—</div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label>Daily times</label>
+                        <div id="dailyTimes" style="font-size:13px;color:var(--muted);">—</div>
+                    </div>
+                    <button class="btn btn-primary" style="width:100%;" id="generateNowBtn" onclick="runAgentNow()">⚡ Run Agent Now</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><div class="card-title">Upcoming Scheduled Posts</div><div class="card-subtitle">Manually scheduled from the Scheduler page</div></div><button class="btn btn-secondary" onclick="showPage('scheduler')">Manage</button></div>
+                <div id="overviewSchedule"><div class="empty">No scheduled posts yet.</div></div>
+            </div>
+        </section>
+
+        <!-- BRANDS -->
+        <section id="brands" class="page">
+            <div class="card">
+                <div class="card-header"><div><div class="card-title">Brand Product Fetcher</div><div class="card-subtitle">Searches live Shopify data across your tracked brands</div></div><button class="btn btn-primary" onclick="fetchProducts()">Fetch Products</button></div>
+                <div class="form-row">
+                    <div class="form-group"><label>Select Brand</label><select id="brandSelect"><option value="all">All Brands</option></select></div>
+                    <div class="form-group"><label>Search Product</label><input id="productSearch" placeholder="oversized henley, bootcut jeans..."></div>
+                </div>
+                <div id="fetchStatus"></div>
+                <div id="productResults" class="brand-list" style="margin-top:14px;"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div><div class="card-title">Supported Brands</div><div class="card-subtitle">17 brands configured in fetcher.js</div></div><span class="badge">LIVE</span></div>
+                <div class="brand-list" id="brandList"><div class="empty">Loading brands…</div></div>
+            </div>
+        </section>
+
+        <!-- CONTENT -->
+        <section id="content" class="page">
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">AI Content Generator</div><div class="card-subtitle">Claude writes captions, hooks and hashtags</div></div></div>
+                    <div class="form-group"><label>Product</label><input id="contentProduct" placeholder="Example: Oversized graphic t-shirt"></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Content Style</label><select id="contentStyle"><option>Streetwear</option><option>Minimal</option><option>Luxury</option><option>Trending</option><option>Gen Z</option></select></div>
+                        <div class="form-group"><label>Platform</label><select><option>Instagram</option></select></div>
+                    </div>
+                    <div class="form-group"><label>Additional Instructions</label><textarea id="contentPrompt" placeholder="Create a viral Instagram caption..."></textarea></div>
+                    <button class="btn btn-purple" id="genContentBtn" onclick="generateContent()">✦ Generate with AI</button>
+                </div>
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Generated Content</div><div class="card-subtitle">Real Claude output</div></div><button class="btn btn-secondary" onclick="copyContent()">Copy</button></div>
+                    <textarea id="generatedContent" placeholder="Your generated caption will appear here..." style="height:350px;"></textarea>
+                </div>
+            </div>
+        </section>
+
+        <!-- IMAGES -->
+        <section id="images" class="page">
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Gemini AI Image Generator</div><div class="card-subtitle">Creates Instagram-ready visuals</div></div></div>
+                    <div class="form-group"><label>Image Prompt</label><textarea id="imagePrompt" placeholder="A premium Indian streetwear model wearing an oversized black t-shirt..."></textarea></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Aspect Ratio</label><select id="imageRatio"><option value="1:1">1:1</option><option value="4:5">4:5 Instagram</option><option value="9:16">9:16 Story/Reel</option></select></div>
+                        <div class="form-group"><label>Number of Images</label><select><option>1</option></select></div>
+                    </div>
+                    <button class="btn btn-purple" id="genImageBtn" onclick="generateImage()">✦ Generate Image</button>
+                </div>
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Preview</div><div class="card-subtitle">Generated image</div></div></div>
+                    <div class="post-image" id="imagePreview">Your AI image will appear here</div>
+                    <button class="btn btn-secondary" style="width:100%;margin-top:12px;" id="useInPublisherBtn" onclick="useGeneratedInPublisher()" disabled>Use in Publisher →</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- PUBLISHER -->
+        <section id="publisher" class="page">
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Instagram Publisher</div><div class="card-subtitle">Publishes directly to your connected account</div></div></div>
+                    <div class="form-group"><label>Image URL</label><input id="publishImage" placeholder="https://..."></div>
+                    <div class="form-group"><label>Caption</label><textarea id="publishCaption" placeholder="Write your Instagram caption..."></textarea></div>
+                    <div class="form-row">
+                        <button class="btn btn-primary" id="publishBtn" onclick="publishNow()">◎ Publish Now</button>
+                        <button class="btn btn-secondary" onclick="showPage('scheduler')">◷ Schedule Instead</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><div><div class="card-title">Instagram Preview</div><div class="card-subtitle">How your post will look</div></div></div>
+                    <div class="post-preview">
+                        <div class="post-image" id="publisherImage">Image preview</div>
+                        <div class="post-body"><div class="post-user" id="publisherHandle">@sbrandofficia</div><div class="post-caption" id="publisherCaption">Your caption will appear here.</div></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SCHEDULER -->
+        <section id="scheduler" class="page">
+            <div class="card">
+                <div class="card-header"><div><div class="card-title">Schedule Instagram Post</div><div class="card-subtitle">Checked every minute, published automatically when due</div></div></div>
+                <div class="form-row">
+                    <div class="form-group"><label>Date</label><input type="date" id="scheduleDate"></div>
+                    <div class="form-group"><label>Time</label><input type="time" id="scheduleTime"></div>
+                </div>
+                <div class="form-group"><label>Caption</label><textarea id="scheduleCaption" placeholder="Instagram caption..."></textarea></div>
+                <div class="form-group"><label>Image URL</label><input id="scheduleImage" placeholder="https://..."></div>
+                <button class="btn btn-primary" id="scheduleBtn" onclick="schedulePost()">◷ Add to Schedule</button>
+            </div>
+            <div class="card">
+                <div class="card-header"><div><div class="card-title">Scheduled Queue</div><div class="card-subtitle">Upcoming automated posts</div></div></div>
+                <div id="scheduleList"><div class="empty">No posts scheduled.</div></div>
+            </div>
+        </section>
+
+        <!-- ACTIVITY -->
+        <section id="activity" class="page">
+            <div class="card">
+                <div class="card-header"><div><div class="card-title">Automation Activity</div><div class="card-subtitle">Complete system activity log — real auto-agent + manual events</div></div><button class="btn btn-secondary" onclick="refreshAll()">Refresh</button></div>
+                <div id="activityList"><div class="empty">Loading…</div></div>
+            </div>
+        </section>
+
+    </div>
+</main>
+
+<script>
+    const pageTitles = { overview: "Overview", brands: "Brand Product Fetcher", content: "AI Content Generator", images: "Gemini AI Images", publisher: "Instagram Publisher", scheduler: "Post Scheduler", activity: "Activity Logs" };
+
+    function showPage(pageId, button = null) {
+        document.querySelectorAll(".page").forEach(page => page.classList.remove("active"));
+        const page = document.getElementById(pageId);
+        if (page) page.classList.add("active");
+        document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
+        if (button) button.classList.add("active");
+        document.getElementById("pageTitle").textContent = pageTitles[pageId] || "Dashboard";
+    }
+
+    function timeAgo(iso) {
+        const diff = Date.now() - new Date(iso).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return "Just now";
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    }
+
+    function statusBadgeClass(status) {
+        if (status === "published") return "";
+        if (status === "pending" || status === "scheduled") return "amber";
+        return "red";
+    }
+
+    /* ===================== LOAD REAL DATA ===================== */
+
+    async function loadStatus() {
+        try {
+            const res = await fetch('/api/status');
+            const data = await res.json();
+
+            document.getElementById('publishedCount').textContent = data.publishedCount;
+            document.getElementById('aiCount').textContent = data.aiCount;
+            document.getElementById('brandCount').textContent = data.brandCount;
+            document.getElementById('scheduledCount').textContent = data.scheduledUpcoming.length;
+
+            document.getElementById('nextRunTime').textContent = new Date(data.nextPostTime).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+            document.getElementById('dailyTimes').textContent = data.postingTimes.join(' · ');
+
+            const dot = document.getElementById('sidebarStatusDot');
+            const text = document.getElementById('sidebarStatusText');
+            const sub = document.getElementById('sidebarStatusSub');
+            const igStatus = document.getElementById('igStatusText');
+
+            if (data.instagramConnected) {
+                dot.className = 'online';
+                text.textContent = 'Agent Online';
+                sub.textContent = 'Auto-posting active';
+                igStatus.textContent = 'Connected';
+            } else {
+                dot.className = 'online off';
+                text.textContent = 'Agent Idle';
+                sub.textContent = 'Instagram not connected';
+                igStatus.textContent = 'Not connected';
+            }
+
+            renderActivity(data.recentPosts);
+            renderOverviewSchedule(data.scheduledUpcoming);
+        } catch (err) {
+            document.getElementById('sidebarStatusText').textContent = 'Server unreachable';
+        }
+    }
+
+    function renderActivity(posts) {
+        const recent = document.getElementById('recentActivity');
+        const full = document.getElementById('activityList');
+        if (!posts.length) {
+            recent.innerHTML = '<div class="empty">No activity yet — the agent runs automatically, or click "Run Agent Now".</div>';
+            full.innerHTML = recent.innerHTML;
+            return;
+        }
+        const html = posts.map(p => `
+            <div class="activity">
+                <div class="activity-icon">${p.imageUrl ? `<img src="${p.imageUrl}">` : '◈'}</div>
+                <div class="activity-text">
+                    ${p.productName || 'Generation'} ${p.brand ? '· ' + p.brand : ''}
+                    <span class="badge ${statusBadgeClass(p.status)}" style="margin-left:6px;">${p.status}</span>
+                    <div class="activity-time">${timeAgo(p.timestamp)}</div>
+                </div>
+            </div>
+        `).join('');
+        recent.innerHTML = html;
+        full.innerHTML = html;
+    }
+
+    function renderOverviewSchedule(scheduled) {
+        const list = document.getElementById('scheduleList');
+        const overview = document.getElementById('overviewSchedule');
+        if (!scheduled.length) {
+            overview.innerHTML = '<div class="empty">No scheduled posts yet.</div>';
+            list.innerHTML = overview.innerHTML;
+            return;
+        }
+        const html = scheduled.map(s => {
+            const d = new Date(s.scheduledFor);
+            return `
+                <div class="schedule-item">
+                    <div class="schedule-date"><div class="schedule-day">${String(d.getDate()).padStart(2,'0')}</div><div class="schedule-month">${d.toLocaleString('en', { month: 'short' })}</div></div>
+                    <div class="schedule-info">
+                        <div class="schedule-title">Instagram Post</div>
+                        <div class="schedule-time">${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+                        <div style="font-size:10px;color:#71717a;margin-top:5px;">${(s.caption || '').substring(0, 80)}</div>
+                    </div>
+                    <span class="badge amber">SCHEDULED</span>
+                </div>
+            `;
+        }).join('');
+        list.innerHTML = html;
+        overview.innerHTML = html;
+    }
+
+    async function loadBrands() {
+        try {
+            const res = await fetch('/api/brands');
+            const data = await res.json();
+            const select = document.getElementById('brandSelect');
+            select.innerHTML = '<option value="all">All Brands</option>' +
+                data.brands.map(b => `<option value="${b.domain}">${b.name}</option>`).join('');
+
+            document.getElementById('brandList').innerHTML = data.brands.map(b => `
+                <div class="brand">
+                    <div class="brand-info">
+                        <div class="brand-logo">${b.name.slice(0,2).toUpperCase()}</div>
+                        <div><div class="brand-name">${b.name}</div><div class="brand-domain">${b.domain}</div></div>
+                    </div>
+                    <span class="badge">LIVE</span>
+                </div>
+            `).join('');
+        } catch (err) {
+            document.getElementById('brandList').innerHTML = '<div class="empty">Could not load brands.</div>';
+        }
+    }
+
+    function refreshAll() { loadStatus(); loadBrands(); }
+
+    /* ===================== AGENT ===================== */
+
+    async function runAgentNow() {
+        const btn = document.getElementById('generateNowBtn');
+        btn.disabled = true;
+        btn.textContent = 'Running agent… (20-40s)';
+        try {
+            const res = await fetch('/api/generate-now', { method: 'POST' });
+            const data = await res.json();
+            btn.textContent = data.success ? '✓ Done' : 'Failed — see Activity';
+        } catch {
+            btn.textContent = 'Failed — server unreachable';
+        }
+        await loadStatus();
+        setTimeout(() => { btn.disabled = false; btn.textContent = '⚡ Run Agent Now'; }, 2000);
+    }
+
+    /* ===================== BRAND FETCHER ===================== */
+
+    async function fetchProducts() {
+        const brand = document.getElementById('brandSelect').value;
+        const query = document.getElementById('productSearch').value;
+        const status = document.getElementById('fetchStatus');
+        const results = document.getElementById('productResults');
+        status.innerHTML = `<span class="loading"></span> Fetching live products...`;
+        results.innerHTML = '';
+
+        try {
+            const response = await fetch('/api/products', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ brand, query })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Request failed');
+
+            status.innerHTML = `<span class="badge">${data.products.length} PRODUCTS FOUND</span>`;
+            results.innerHTML = data.products.map(p => `
+                <div class="brand">
+                    <div class="brand-info">
+                        <div class="brand-logo" style="background-image:url('${p.image}');background-size:cover;"></div>
+                        <div><div class="brand-name">${p.productName}</div><div class="brand-domain">${p.brand} · ₹${p.price ?? '—'}</div></div>
+                    </div>
+                    <span class="badge ${p.stockStatus === 'in' ? '' : p.stockStatus === 'low' ? 'amber' : 'red'}">${p.stockStatus}</span>
+                </div>
+            `).join('') || '<div class="empty">No matching products found.</div>';
+        } catch (error) {
+            status.innerHTML = `<span style="color:#f87171;font-size:11px;">${error.message}</span>`;
+        }
+    }
+
+    /* ===================== AI CONTENT ===================== */
+
+    async function generateContent() {
+        const product = document.getElementById('contentProduct').value;
+        const style = document.getElementById('contentStyle').value;
+        const prompt = document.getElementById('contentPrompt').value;
+        const output = document.getElementById('generatedContent');
+        const btn = document.getElementById('genContentBtn');
+        output.value = 'Generating with Claude…';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch('/api/generate-content', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ product, style, prompt })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+            output.value = data.content;
+        } catch (error) {
+            output.value = 'Error: ' + error.message;
+        }
+        btn.disabled = false;
+        loadStatus();
+    }
+
+    async function copyContent() {
+        await navigator.clipboard.writeText(document.getElementById('generatedContent').value);
+    }
+
+    /* ===================== AI IMAGES ===================== */
+
+    let lastGeneratedImageUrl = null;
+
+    async function generateImage() {
+        const prompt = document.getElementById('imagePrompt').value;
+        const ratio = document.getElementById('imageRatio').value;
+        const preview = document.getElementById('imagePreview');
+        const btn = document.getElementById('genImageBtn');
+        preview.innerHTML = `<span class="loading"></span> Generating with Gemini… (20-30s)`;
+        btn.disabled = true;
+
+        try {
+            const response = await fetch('/api/generate-image', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt, ratio })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+            preview.innerHTML = `<img src="${data.imageUrl}">`;
+            lastGeneratedImageUrl = data.imageUrl;
+            document.getElementById('useInPublisherBtn').disabled = false;
+        } catch (error) {
+            preview.innerHTML = `<span style="color:#f87171;">${error.message}</span>`;
+        }
+        btn.disabled = false;
+        loadStatus();
+    }
+
+    function useGeneratedInPublisher() {
+        if (!lastGeneratedImageUrl) return;
+        document.getElementById('publishImage').value = lastGeneratedImageUrl;
+        document.getElementById('publishImage').dispatchEvent(new Event('input'));
+        showPage('publisher');
+        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    }
+
+    /* ===================== PUBLISHER ===================== */
+
+    document.getElementById('publishImage').addEventListener('input', function () {
+        const preview = document.getElementById('publisherImage');
+        preview.innerHTML = this.value
+            ? `<img src="${this.value}" onerror="this.parentElement.innerHTML='Invalid image URL'">`
+            : 'Image preview';
+    });
+
+    document.getElementById('publishCaption').addEventListener('input', function () {
+        document.getElementById('publisherCaption').textContent = this.value || 'Your caption will appear here.';
+    });
+
+    async function publishNow() {
+        const image = document.getElementById('publishImage').value;
+        const caption = document.getElementById('publishCaption').value;
+        const btn = document.getElementById('publishBtn');
+        if (!image || !caption) { alert('Add image and caption first.'); return; }
+
+        btn.disabled = true;
+        btn.textContent = 'Publishing…';
+        try {
+            const response = await fetch('/api/publish', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image, caption })
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error);
+            alert('Published to Instagram!');
+        } catch (error) {
+            alert('Publish failed: ' + error.message);
+        }
+        btn.disabled = false;
+        btn.textContent = '◎ Publish Now';
+        loadStatus();
+    }
+
+    /* ===================== SCHEDULER ===================== */
+
+    async function schedulePost() {
+        const date = document.getElementById('scheduleDate').value;
+        const time = document.getElementById('scheduleTime').value;
+        const caption = document.getElementById('scheduleCaption').value;
+        const image = document.getElementById('scheduleImage').value;
+        const btn = document.getElementById('scheduleBtn');
+
+        if (!date || !time || !caption) { alert('Please fill date, time and caption.'); return; }
+
+        btn.disabled = true;
+        try {
+            const response = await fetch('/api/schedule', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date, time, caption, image })
+            });
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error);
+            alert('Post scheduled — will auto-publish at the set time.');
+        } catch (error) {
+            alert('Scheduling failed: ' + error.message);
+        }
+        btn.disabled = false;
+        loadStatus();
+    }
+
+    /* ===================== INIT ===================== */
+
+    refreshAll();
+    setInterval(refreshAll, 30000); // keep dashboard live, reflects the auto-agent in real time
+</script>
+
+</body>
+</html>

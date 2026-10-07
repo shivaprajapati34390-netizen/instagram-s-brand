@@ -1,0 +1,19 @@
+{
+  "name": "sbrand-instagram-automation",
+  "version": "1.0.0",
+  "description": "24/7 Instagram content automation for S-Brand — trend research, AI image generation, and scheduled posting",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "generate-once": "node content-generator.js --ai-image"
+  },
+  "dependencies": {
+    "@google/genai": "^2.25.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

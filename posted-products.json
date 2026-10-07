@@ -1,0 +1,20 @@
+[
+  {
+    "key": "product:mecnex:croc textured leather jacket",
+    "productId": null,
+    "productName": "CROC TEXTURED LEATHER JACKET",
+    "brand": "Mecnex",
+    "price": 2499,
+    "productUrl": "https://mecnex.com/products/croc-textured-leather-jacket-2",
+    "postedAt": "2026-10-07T05:12:05.277Z"
+  },
+  {
+    "key": "product:gritstones:off white men double pocket winter overshirt",
+    "productId": null,
+    "productName": "Off White Men Double Pocket Winter Overshirt",
+    "brand": "Gritstones",
+    "price": 2999,
+    "productUrl": "https://gritstones.com/products/off-white-men-double-pocket-heavy-winter-jacket",
+    "postedAt": "2026-10-07T05:24:44.351Z"
+  }
+]
