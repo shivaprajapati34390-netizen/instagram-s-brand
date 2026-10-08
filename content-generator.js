@@ -1,260 +1,262 @@
 const fs = require("fs");
 const path = require("path");
-
+ 
 require("dotenv").config();
-
+ 
 // content-generator.js
 // Two modes:
 // 1. generateWeeklyPost() — auto-agent pipeline
 // 2. generateCustomCaption() — manual dashboard AI Content tool
-
+ 
 const { searchAllBrands } = require("./fetcher");
-
+ 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-const GEMINI_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
-
+ 
 // ============================================================
 // POSTED PRODUCT MEMORY
 // ============================================================
-
-const POSTED_PRODUCTS_FILE = path.join(
-  __dirname,
-  "posted-products.json"
-);
-
-
+ 
+// Set POSTED_PRODUCTS_FILE in .env to a persistent disk path
+// if your host wipes the filesystem on every deploy.
+const POSTED_PRODUCTS_FILE =
+  process.env.POSTED_PRODUCTS_FILE ||
+  path.join(__dirname, "posted-products.json");
+ 
+ 
 /**
  * Load products that S-Brand has already posted.
  */
 function loadPostedProducts() {
   try {
-
     if (!fs.existsSync(POSTED_PRODUCTS_FILE)) {
       return [];
     }
-
-    const data = fs.readFileSync(
-      POSTED_PRODUCTS_FILE,
-      "utf8"
-    ).trim();
-
+ 
+    const data = fs.readFileSync(POSTED_PRODUCTS_FILE, "utf8").trim();
+ 
     if (!data) {
       return [];
     }
-
+ 
     const parsed = JSON.parse(data);
-
+ 
     if (!Array.isArray(parsed)) {
-      console.warn(
-        "[S-Brand] posted-products.json is not an array. Resetting."
-      );
-
+      console.warn("[S-Brand] posted-products.json is not an array. Resetting.");
       return [];
     }
-
+ 
     return parsed;
-
   } catch (error) {
-
     console.error(
       "[S-Brand] Failed to read posted-products.json:",
       error.message
     );
-
     return [];
   }
 }
-
-
+ 
+ 
 /**
- * Save posted-product history.
+ * Save posted-product history (atomic: write temp file, then rename).
  */
 function savePostedProducts(products) {
-
   try {
-
-    fs.writeFileSync(
-      POSTED_PRODUCTS_FILE,
-      JSON.stringify(products, null, 2),
-      "utf8"
-    );
-
+    const tmpFile = `${POSTED_PRODUCTS_FILE}.tmp`;
+ 
+    fs.writeFileSync(tmpFile, JSON.stringify(products, null, 2), "utf8");
+    fs.renameSync(tmpFile, POSTED_PRODUCTS_FILE);
   } catch (error) {
-
     console.error(
       "[S-Brand] Failed to save posted-products.json:",
       error.message
     );
-
     throw error;
   }
 }
-
-
+ 
+ 
+// ------------------------------------------------------------
+// Normalizers
+// ------------------------------------------------------------
+ 
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+ 
+function normalizeUrl(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .split("?")[0]
+    .replace(/\/+$/, "")
+    // Shopify duplicate slugs: /some-product-1, /some-product-2
+    .replace(/-\d+$/, "");
+}
+ 
+function getProductName(product) {
+  return (
+    product.productName ||
+    product.title ||
+    product.name ||
+    ""
+  );
+}
+ 
+ 
 /**
- * Generate a stable unique key for a product.
+ * Primary key: brand + normalized product name.
  *
- * Priority:
- * 1. Product ID
- * 2. Product URL
- * 3. Product name + brand
+ * This is deliberately checked FIRST (before id / url) because the
+ * same product can show up with different ids or URL variants.
+ *
+ * Fallbacks: id -> productId -> normalized URL.
  */
 function getProductKey(product) {
-
   if (!product) {
     return null;
   }
-
-  // ----------------------------------------------------------
-  // 1. Use a real product ID when the source provides one
-  // ----------------------------------------------------------
-
-  if (product.id) {
-    return `id:${String(product.id).trim()}`;
-  }
-
-  if (product.productId) {
-    return `productId:${String(product.productId).trim()}`;
-  }
-
-  // ----------------------------------------------------------
-  // 2. For Shopify products without an ID, use:
-  //    brand + normalized product name
-  //
-  //    This prevents the same product from being treated
-  //    as different just because Shopify has multiple URLs:
-  //
-  //    /croc-textured-leather-jacket
-  //    /croc-textured-leather-jacket-1
-  //    /croc-textured-leather-jacket-2
-  // ----------------------------------------------------------
-
-  const brand =
-    String(product.brand || "")
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, " ");
-
-  const name =
-    String(
-      product.productName ||
-      product.title ||
-      product.name ||
-      ""
-    )
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, " ");
-
+ 
+  const brand = normalizeText(product.brand);
+  const name = normalizeText(getProductName(product));
+ 
   if (brand && name) {
     return `product:${brand}:${name}`;
   }
-
-  // ----------------------------------------------------------
-  // 3. Final fallback: URL
-  // ----------------------------------------------------------
-
-  const url =
-    product.url ||
-    product.productUrl ||
-    "";
-
-  if (url) {
-    return `url:${String(url).trim().toLowerCase()}`;
+ 
+  if (product.id) {
+    return `id:${String(product.id).trim()}`;
   }
-
+ 
+  if (product.productId) {
+    return `productId:${String(product.productId).trim()}`;
+  }
+ 
+  const url = normalizeUrl(product.url || product.productUrl);
+ 
+  if (url) {
+    return `url:${url}`;
+  }
+ 
   return null;
 }
-
-
+ 
+ 
+/**
+ * Every key a product could be known by (new + legacy formats).
+ */
+function getAllProductKeys(product) {
+  const keys = new Set();
+ 
+  if (!product) {
+    return keys;
+  }
+ 
+  const primary = getProductKey(product);
+  if (primary) keys.add(primary);
+ 
+  if (product.id) keys.add(`id:${String(product.id).trim()}`);
+  if (product.productId) keys.add(`productId:${String(product.productId).trim()}`);
+ 
+  const rawUrl = String(product.url || product.productUrl || "")
+    .trim()
+    .toLowerCase();
+  if (rawUrl) keys.add(`url:${rawUrl}`);
+ 
+  const normUrl = normalizeUrl(rawUrl);
+  if (normUrl) keys.add(`url:${normUrl}`);
+ 
+  return keys;
+}
+ 
+ 
+/**
+ * Build a Set of all keys from the posting history,
+ * including old-format entries, so nothing slips through.
+ */
+function buildPostedKeySet(postedProducts) {
+  const set = new Set();
+ 
+  for (const entry of postedProducts) {
+    if (entry.key) {
+      set.add(entry.key);
+    }
+ 
+    // Recompute keys from stored fields (handles old key formats)
+    const asProduct = {
+      id: entry.productId,
+      brand: entry.brand,
+      productName: entry.productName,
+      url: entry.productUrl,
+    };
+ 
+    for (const key of getAllProductKeys(asProduct)) {
+      set.add(key);
+    }
+  }
+ 
+  return set;
+}
+ 
+ 
 /**
  * Mark a product as successfully posted.
  *
  * IMPORTANT:
- * This function should ONLY be called after
- * Instagram confirms the post was published.
+ * Call this ONLY after Instagram confirms the post was published.
  */
 function markProductAsPosted(product) {
-
   if (!product) {
-    console.warn(
-      "[S-Brand] Cannot mark empty product as posted."
-    );
-
+    console.warn("[S-Brand] Cannot mark empty product as posted.");
     return;
   }
-
-  const postedProducts =
-    loadPostedProducts();
-
-  const key =
-    getProductKey(product);
-
-  // Prevent duplicate history entries
-  const alreadyPosted =
-    postedProducts.some(
-      (item) => item.key === key
+ 
+  const key = getProductKey(product);
+ 
+  if (!key) {
+    console.warn(
+      "[S-Brand] Product has no usable key (no brand/name/id/url). Not saved."
     );
-
+    return;
+  }
+ 
+  const postedProducts = loadPostedProducts();
+  const postedKeys = buildPostedKeySet(postedProducts);
+ 
+  const alreadyPosted = [...getAllProductKeys(product)].some((k) =>
+    postedKeys.has(k)
+  );
+ 
   if (alreadyPosted) {
-
     console.log(
       `[S-Brand] Product already exists in posting history: ${key}`
     );
-
     return;
   }
-
-  const historyEntry = {
-
+ 
+  postedProducts.push({
     key,
-
-    productId:
-      product.id ||
-      product.productId ||
-      null,
-
-    productName:
-      product.productName ||
-      product.title ||
-      product.name ||
-      null,
-
-    brand:
-      product.brand ||
-      null,
-
-    price:
-      product.price ||
-      null,
-
-    productUrl:
-      product.url ||
-      product.productUrl ||
-      null,
-
-    postedAt:
-      new Date().toISOString()
-  };
-
-  postedProducts.push(historyEntry);
-
-  savePostedProducts(
-    postedProducts
-  );
-
-  console.log(
-    `[S-Brand] ✅ Product saved to posting history: ${key}`
-  );
+    productId: product.id || product.productId || null,
+    productName: getProductName(product) || null,
+    brand: product.brand || null,
+    price: product.price || null,
+    productUrl: product.url || product.productUrl || null,
+    postedAt: new Date().toISOString(),
+  });
+ 
+  savePostedProducts(postedProducts);
+ 
+  console.log(`[S-Brand] ✅ Product saved to posting history: ${key}`);
 }
-
-
+ 
+ 
 // ============================================================
 // TREND TOPICS
 // ============================================================
-
+ 
 const TREND_SEED_TOPICS = [
   "oversized henley",
   "bootcut jeans",
@@ -263,694 +265,391 @@ const TREND_SEED_TOPICS = [
   "ribbed henley",
   "cargo pants",
 ];
-
-
+ 
+ 
 function pickWeeklyTopic() {
-
   const now = new Date();
-
+ 
   const weekNumber = Math.floor(
-    (now - new Date(now.getFullYear(), 0, 1)) /
-      (7 * 24 * 60 * 60 * 1000)
+    (now - new Date(now.getFullYear(), 0, 1)) / (7 * 24 * 60 * 60 * 1000)
   );
-
-  return TREND_SEED_TOPICS[
-    weekNumber % TREND_SEED_TOPICS.length
-  ];
+ 
+  return TREND_SEED_TOPICS[weekNumber % TREND_SEED_TOPICS.length];
 }
-
-
+ 
+ 
 // ============================================================
 // FIND FEATURED PRODUCT
 // ============================================================
-
+ 
 async function findFeaturedProduct(topic) {
-
-  const results =
-    await searchAllBrands(topic);
-
-  const inStock =
-    results.filter(
-      (r) => r.stockStatus === "in"
-    );
-
+  const results = await searchAllBrands(topic);
+ 
+  const inStock = results.filter((r) => r.stockStatus === "in");
+ 
   if (inStock.length === 0) {
-
-    throw new Error(
-      `No in-stock products found for topic "${topic}"`
-    );
+    throw new Error(`No in-stock products found for topic "${topic}"`);
   }
-
-
+ 
   // ----------------------------------------------------------
-  // Load previously posted products
+  // Load previously posted products (all key formats)
   // ----------------------------------------------------------
-
-  const postedProducts =
-    loadPostedProducts();
-
-  const postedKeys =
-    new Set(
-      postedProducts.map(
-        (p) => p.key
-      )
-    );
-
-
+ 
+  const postedProducts = loadPostedProducts();
+  const postedKeys = buildPostedKeySet(postedProducts);
+ 
   // ----------------------------------------------------------
-  // Remove products that have already been posted
+  // Remove already-posted products AND duplicates within
+  // the current search results
   // ----------------------------------------------------------
-
-  const unusedProducts =
-    inStock.filter(
-      (product) => {
-
-        const key =
-          getProductKey(product);
-
-        return !postedKeys.has(key);
-      }
-    );
-
-
-  console.log(
-    `[S-Brand] Found ${inStock.length} in-stock products.`
-  );
-
-  console.log(
-    `[S-Brand] ${postedProducts.length} products already posted.`
-  );
-
+ 
+  const seenThisRun = new Set();
+  const unusedProducts = [];
+ 
+  for (const product of inStock) {
+    const keys = [...getAllProductKeys(product)];
+ 
+    if (keys.length === 0) {
+      continue;
+    }
+ 
+    if (keys.some((k) => postedKeys.has(k))) {
+      continue;
+    }
+ 
+    const primary = getProductKey(product);
+ 
+    if (seenThisRun.has(primary)) {
+      continue;
+    }
+ 
+    seenThisRun.add(primary);
+    unusedProducts.push(product);
+  }
+ 
+  console.log(`[S-Brand] Found ${inStock.length} in-stock products.`);
+  console.log(`[S-Brand] ${postedProducts.length} products already posted.`);
   console.log(
     `[S-Brand] ${unusedProducts.length} products have not been posted yet.`
   );
-
-
-  // ----------------------------------------------------------
-  // No unused products
-  // ----------------------------------------------------------
-
+ 
   if (unusedProducts.length === 0) {
-
     throw new Error(
       `All in-stock products for topic "${topic}" have already been posted.`
     );
   }
-
-
+ 
   // ----------------------------------------------------------
   // Prefer products with more available sizes
   // ----------------------------------------------------------
-
+ 
   unusedProducts.sort(
     (a, b) =>
-      (b.availableSizes?.length || 0) -
-      (a.availableSizes?.length || 0)
+      (b.availableSizes?.length || 0) - (a.availableSizes?.length || 0)
   );
-
-
-  // ----------------------------------------------------------
-  // Select new product
-  // ----------------------------------------------------------
-
-  const selectedProduct =
-    unusedProducts[0];
-
-
+ 
+  const selectedProduct = unusedProducts[0];
+ 
   console.log(
     `[S-Brand] 🆕 NEW PRODUCT SELECTED: ${
-      selectedProduct.productName ||
-      selectedProduct.title ||
-      selectedProduct.name ||
-      "Unknown"
+      getProductName(selectedProduct) || "Unknown"
     }`
   );
-
-  console.log(
-    `[S-Brand] Product key: ${
-      getProductKey(selectedProduct)
-    }`
-  );
-
-
+  console.log(`[S-Brand] Product key: ${getProductKey(selectedProduct)}`);
+ 
   return selectedProduct;
 }
-
-
+ 
+ 
 // ============================================================
 // GEMINI API
 // ============================================================
-
-async function callGemini(
-  prompt,
-  maxTokens = 1200
-) {
-
+ 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+ 
+async function callGemini(prompt, maxTokens = 1200) {
   if (!GEMINI_API_KEY) {
-
-    throw new Error(
-      "GEMINI_API_KEY is missing from your .env file"
-    );
+    throw new Error("GEMINI_API_KEY is missing from your .env file");
   }
-
-
-  const models = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash"
-  ];
-
-
+ 
+  const models = ["gemini-3.8-flash", "gemini-3.7-flash"];
+ 
   let lastError = null;
-
-
+ 
   for (const model of models) {
-
-    const url =
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-
-    for (
-      let attempt = 1;
-      attempt <= 3;
-      attempt++
-    ) {
-
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+ 
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-
-        console.log(
-          `[Gemini] ${model} → Attempt ${attempt}/3`
-        );
-
-
-        const response =
-          await fetch(
-            `${url}?key=${GEMINI_API_KEY}`,
-            {
-              method: "POST",
-
-              headers: {
-                "Content-Type": "application/json"
-              },
-
-              body: JSON.stringify({
-
-                contents: [
-                  {
-                    parts: [
-                      {
-                        text: prompt
-                      }
-                    ]
-                  }
-                ],
-
-                generationConfig: {
-                  maxOutputTokens: maxTokens,
-                  temperature: 0.7
-                }
-
-              })
-            }
-          );
-
-
-        const responseText =
-          await response.text();
-
-
+        console.log(`[Gemini] ${model} → Attempt ${attempt}/3`);
+ 
+        const response = await fetch(`${url}?key=${GEMINI_API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              maxOutputTokens: maxTokens,
+              temperature: 0.7,
+            },
+          }),
+        });
+ 
+        const responseText = await response.text();
+ 
         if (response.ok) {
-
-          const data =
-            JSON.parse(responseText);
-
-
-          const result =
-            data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-
+          const data = JSON.parse(responseText);
+ 
+          const result = data.candidates?.[0]?.content?.parts?.[0]?.text;
+ 
           if (!result) {
-
-            throw new Error(
-              `Gemini ${model} returned an empty response`
-            );
+            throw new Error(`Gemini ${model} returned an empty response`);
           }
-
-
-          console.log(
-            `[Gemini] ${model} → SUCCESS`
-          );
-
-
+ 
+          console.log(`[Gemini] ${model} → SUCCESS`);
+ 
           return result.trim();
         }
-
-
-        lastError =
-          new Error(
-            `Gemini ${model} API error ${response.status}: ${responseText}`
-          );
-
-
-        // Retry temporary errors
-        if (
-          [429, 500, 503].includes(
-            response.status
-          )
-        ) {
-
+ 
+        lastError = new Error(
+          `Gemini ${model} API error ${response.status}: ${responseText}`
+        );
+ 
+        // Temporary errors: retry, then fall back to next model
+        if ([429, 500, 503].includes(response.status)) {
           if (attempt < 3) {
-
-            const delay =
-              5000 *
-              Math.pow(
-                2,
-                attempt - 1
-              );
-
-
+            const delay = 5000 * Math.pow(2, attempt - 1);
+ 
             console.log(
               `[Gemini] ${model} returned ${response.status}. ` +
-              `Retrying in ${delay / 1000}s...`
+                `Retrying in ${delay / 1000}s...`
             );
-
-
-            await new Promise(
-              resolve =>
-                setTimeout(
-                  resolve,
-                  delay
-                )
-            );
-
-
+ 
+            await sleep(delay);
             continue;
           }
-
-
-          console.log(
-            `[Gemini] ${model} failed after 3 attempts.`
-          );
-
-
+ 
+          console.log(`[Gemini] ${model} failed after 3 attempts.`);
           break;
         }
-
-
-        // Don't retry permanent errors
+ 
+        // Permanent errors (400, 401, 403, 404...): do NOT retry
+        lastError.permanent = true;
         throw lastError;
-
-
       } catch (error) {
-
-        lastError =
-          error;
-
-
+        lastError = error;
+ 
+        if (error.permanent) {
+          console.log(`[Gemini] ${model} permanent error. Skipping retries.`);
+          break;
+        }
+ 
         if (attempt < 3) {
-
-          const delay =
-            5000 *
-            Math.pow(
-              2,
-              attempt - 1
-            );
-
-
+          const delay = 5000 * Math.pow(2, attempt - 1);
+ 
           console.log(
-            `[Gemini] Request failed. ` +
-            `Retrying in ${delay / 1000}s...`
+            `[Gemini] Request failed. Retrying in ${delay / 1000}s...`
           );
-
-
-          await new Promise(
-            resolve =>
-              setTimeout(
-                resolve,
-                delay
-              )
-          );
+ 
+          await sleep(delay);
         }
       }
     }
-
-
+ 
     console.log(
       `[Gemini] Trying fallback model: ${
-        models[
-          models.indexOf(model) + 1
-        ] || "none"
+        models[models.indexOf(model) + 1] || "none"
       }`
     );
   }
-
-
-  throw (
-    lastError ||
-    new Error(
-      "All Gemini models failed"
-    )
-  );
+ 
+  throw lastError || new Error("All Gemini models failed");
 }
-
-
+ 
+ 
 // ============================================================
 // AUTOMATIC CAPTION GENERATOR
 // ============================================================
-
-async function generateCaptionAndHashtags(
-  product,
-  topic
-) {
-
-  const prompt =
-`You are writing an Instagram caption for S-Brand, a platform that compares live price and stock across 17+ Indian D2C fashion brands.
-
+ 
+async function generateCaptionAndHashtags(product, topic) {
+  const prompt = `You are writing an Instagram caption for S-Brand, a platform that compares live price and stock across 17+ Indian D2C fashion brands.
+ 
 Featured product this week: "${product.productName}" from ${product.brand}, priced at ₹${product.price}.
 Trend angle: ${topic}
-
+ 
 Write:
-
+ 
 1. A short, punchy Instagram caption (2-3 sentences max), casual Gen-Z-friendly Indian English.
 2. A line inviting people to check "link in bio" to compare.
 3. 15-18 Instagram hashtags (broad + niche + #sbrand + India-specific).
-
+ 
 IMPORTANT:
 Return ONLY valid JSON.
 Do NOT use markdown code fences.
 Do NOT add any explanation before or after the JSON.
-
+ 
 Use exactly this structure:
-
+ 
 {
   "caption": "your caption",
   "cta": "your call to action",
   "hashtags": ["#tag1", "#tag2", "#tag3"]
 }`;
-
-
-  const text =
-    await callGemini(prompt);
-
-
+ 
+  const text = await callGemini(prompt);
+ 
   try {
-
     // Remove markdown code fences
-    let cleaned =
-      text
-        .trim()
-        .replace(
-          /^```json\s*/i,
-          ""
-        )
-        .replace(
-          /^```\s*/i,
-          ""
-        )
-        .replace(
-          /\s*```$/i,
-          ""
-        )
-        .trim();
-
-
+    let cleaned = text
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+ 
     // Find JSON object if Gemini adds extra text
-    const start =
-      cleaned.indexOf("{");
-
-    const end =
-      cleaned.lastIndexOf("}");
-
-
-    if (
-      start !== -1 &&
-      end !== -1 &&
-      end > start
-    ) {
-
-      cleaned =
-        cleaned.slice(
-          start,
-          end + 1
-        );
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+ 
+    if (start !== -1 && end !== -1 && end > start) {
+      cleaned = cleaned.slice(start, end + 1);
     }
-
-
-    const parsed =
-      JSON.parse(cleaned);
-
-
-    // Validate required fields
+ 
+    const parsed = JSON.parse(cleaned);
+ 
     if (
       !parsed.caption ||
       !parsed.cta ||
-      !Array.isArray(
-        parsed.hashtags
-      )
+      !Array.isArray(parsed.hashtags)
     ) {
-
-      throw new Error(
-        "Gemini returned incomplete caption JSON"
-      );
+      throw new Error("Gemini returned incomplete caption JSON");
     }
-
-
+ 
     return {
-
-      caption:
-        parsed.caption.trim(),
-
-      cta:
-        parsed.cta.trim(),
-
-      hashtags:
-        parsed.hashtags
-          .map(
-            tag =>
-              String(tag).trim()
-          )
-          .filter(Boolean)
-
+      caption: parsed.caption.trim(),
+      cta: parsed.cta.trim(),
+      hashtags: parsed.hashtags
+        .map((tag) => String(tag).trim())
+        .filter(Boolean),
     };
-
-
   } catch (error) {
-
-    console.log(
-      "[Gemini] Caption JSON parsing failed."
-    );
-
-    console.log(
-      "[Gemini] Raw response:",
-      text
-    );
-
-
-    throw new Error(
-      "Could not parse Gemini caption response as JSON"
-    );
+    console.log("[Gemini] Caption JSON parsing failed.");
+    console.log("[Gemini] Raw response:", text);
+ 
+    throw new Error("Could not parse Gemini caption response as JSON");
   }
 }
-
-
+ 
+ 
 // ============================================================
 // AUTO AGENT PIPELINE
 // ============================================================
-
-async function generateWeeklyPost(
-  useAiImage = false
-) {
-
-  const {
-    generateTrendImage
-  } = require("./gemini-image");
-
-
-  const topic =
-    pickWeeklyTopic();
-
-
-  console.log(
-    `[S-Brand] Weekly topic: ${topic}`
-  );
-
-
-  const product =
-    await findFeaturedProduct(
-      topic
-    );
-
-
-  const content =
-    await generateCaptionAndHashtags(
-      product,
-      topic
-    );
-
-
+ 
+async function generateWeeklyPost(useAiImage = false) {
+  const { generateTrendImage } = require("./gemini-image");
+ 
+  const topic = pickWeeklyTopic();
+ 
+  console.log(`[S-Brand] Weekly topic: ${topic}`);
+ 
+  const product = await findFeaturedProduct(topic);
+ 
+  const content = await generateCaptionAndHashtags(product, topic);
+ 
   // Default to real product photo
   let imageData = {
-
-    imageUrl:
-      product.image,
-
-    aiGenerated:
-      false,
-
+    imageUrl: product.image,
+    aiGenerated: false,
   };
-
-
+ 
   // ----------------------------------------------------------
   // Optional AI image
   // ----------------------------------------------------------
-
+ 
   if (useAiImage) {
-
     try {
-
-      const aiImage =
-        await generateTrendImage(
-          product,
-          topic
-        );
-
-
+      const aiImage = await generateTrendImage(product, topic);
+ 
       imageData = {
-
-        imageBase64:
-          aiImage.base64,
-
-        imageMimeType:
-          aiImage.mimeType,
-
-        aiGenerated:
-          true,
-
+        imageBase64: aiImage.base64,
+        imageMimeType: aiImage.mimeType,
+        aiGenerated: true,
       };
-
-
     } catch (err) {
-
       console.warn(
         "Gemini image generation failed, falling back to real product photo:",
         err.message
       );
-
-
+ 
       imageData = {
-
-        imageUrl:
-          product.image,
-
-        aiGenerated:
-          false,
-
+        imageUrl: product.image,
+        aiGenerated: false,
       };
     }
   }
-
-
+ 
   // ----------------------------------------------------------
   // Return generated post
   // ----------------------------------------------------------
-
+ 
   return {
-
     ...imageData,
-
-
-    productName:
-      product.productName,
-
-    brand:
-      product.brand,
-
-    price:
-      product.price,
-
-    productUrl:
-      product.url,
-
-
+ 
+    productName: product.productName,
+    brand: product.brand,
+    price: product.price,
+    productUrl: product.url,
+ 
     // IMPORTANT:
-    // Keep original product available so
-    // state-machine.js can mark it as posted
-    // after Instagram succeeds.
+    // Keep original product available so state-machine.js
+    // can call markProductAsPosted() after Instagram succeeds.
     product,
-
-
-    caption:
-      content.caption,
-
-    cta:
-      content.cta,
-
-    hashtags:
-      content.hashtags,
-
-
+ 
+    caption: content.caption,
+    cta: content.cta,
+    hashtags: content.hashtags,
+ 
     fullCaptionText:
       `${content.caption}\n\n` +
       `${content.cta}\n\n` +
-      content.hashtags
-        .map(
-          h =>
-            `#${h.replace(/^#/, "")}`
-        )
-        .join(" "),
+      content.hashtags.map((h) => `#${h.replace(/^#/, "")}`).join(" "),
   };
 }
-
-
+ 
+ 
 // ============================================================
 // MANUAL DASHBOARD AI CONTENT
 // ============================================================
-
-async function generateCustomCaption(
-  product,
-  style,
-  extraPrompt
-) {
-
-  const prompt =
-`You are writing an Instagram caption for S-Brand, a platform that compares live price and stock across 17+ Indian D2C fashion brands.
-
+ 
+async function generateCustomCaption(product, style, extraPrompt) {
+  const prompt = `You are writing an Instagram caption for S-Brand, a platform that compares live price and stock across 17+ Indian D2C fashion brands.
+ 
 Product: ${product || "a trending fashion item"}
 Style: ${style || "Streetwear"}
 ${extraPrompt ? `Additional instructions: ${extraPrompt}` : ""}
-
+ 
 Write a ready-to-post Instagram caption (2-4 sentences), a line inviting people to compare on S-Brand (link in bio), then 15-18 hashtags (broad + niche + #sbrand + India-specific).
-
+ 
 Respond with ONLY the final caption text, fully formatted, ready to paste into Instagram — no JSON, no explanation.`;
-
-
-  return callGemini(
-    prompt,
-    500
-  );
+ 
+  return callGemini(prompt, 500);
 }
-
-
+ 
+ 
 // ============================================================
 // EXPORTS
 // ============================================================
-
+ 
 module.exports = {
-
   generateWeeklyPost,
-
   pickWeeklyTopic,
-
   findFeaturedProduct,
-
   generateCustomCaption,
-
+ 
   // Product memory functions
   loadPostedProducts,
-
   savePostedProducts,
-
   getProductKey,
-
   markProductAsPosted,
-
 };
+ 
