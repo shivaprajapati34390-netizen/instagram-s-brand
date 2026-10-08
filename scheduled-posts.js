@@ -1,87 +1,115 @@
-// scheduled-posts.js
-// Handles ONE-OFF posts scheduled manually from the dashboard's
-// Scheduler page (different from the recurring 3x/day auto-agent
-// in scheduler.js). Stores entries in a JSON file and checks every
-// minute for anything due to publish.
+﻿// scheduled-posts.js
+// Handles manually scheduled one-off Instagram posts.
 
 const fs = require("fs");
 const path = require("path");
-const { publishPost, isConfigured } = require("./instagram");
 
-const FILE = path.join(__dirname, "scheduled-posts.json");
+const SCHEDULE_FILE = path.join(__dirname, "scheduled-posts.json");
 
-function load() {
+function loadScheduled() {
   try {
-    return JSON.parse(fs.readFileSync(FILE, "utf-8"));
-  } catch {
+    if (!fs.existsSync(SCHEDULE_FILE)) {
+      return [];
+    }
+
+    const data = fs.readFileSync(SCHEDULE_FILE, "utf-8");
+
+    if (!data.trim()) {
+      return [];
+    }
+
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("[Scheduled Posts] Failed to load:", error.message);
     return [];
   }
 }
 
-function save(list) {
-  fs.writeFileSync(FILE, JSON.stringify(list, null, 2));
+function saveScheduled(posts) {
+  fs.writeFileSync(
+    SCHEDULE_FILE,
+    JSON.stringify(posts, null, 2),
+    "utf-8"
+  );
 }
 
 function addScheduledPost({ date, time, caption, image }) {
-  const list = load();
+  const posts = loadScheduled();
+
+  const scheduledFor = new Date(`${date}T${time}:00+05:30`);
+
   const entry = {
-    id: Date.now().toString(),
-    scheduledFor: `${date}T${time}:00`,
+    id: `scheduled-${Date.now()}`,
+    scheduledFor: scheduledFor.toISOString(),
+    date,
+    time,
     caption,
-    image,
+    image: image || null,
     status: "scheduled",
     createdAt: new Date().toISOString(),
   };
-  list.push(entry);
-  save(list);
+
+  posts.push(entry);
+  saveScheduled(posts);
+
   return entry;
 }
 
 function getUpcoming() {
-  return load().filter((p) => p.status === "scheduled");
-}
+  const posts = loadScheduled();
+  const now = Date.now();
 
-function getAll() {
-  return load();
-}
-
-/**
- * Call once a minute. Publishes anything whose time has arrived.
- */
-async function checkAndPublishDue() {
-  const list = load();
-  const now = new Date();
-  let changed = false;
-
-  for (const post of list) {
-    if (post.status !== "scheduled") continue;
-    if (new Date(post.scheduledFor) > now) continue;
-
-    changed = true;
-    if (!isConfigured()) {
-      post.status = "failed";
-      post.error = "Instagram not connected";
-      continue;
-    }
-
-    try {
-      const result = await publishPost(post.image, post.caption);
-      post.status = "published";
-      post.postId = result.postId;
-    } catch (err) {
-      post.status = "failed";
-      post.error = err.message;
-    }
-  }
-
-  if (changed) save(list);
+  return posts
+    .filter((post) => {
+      return (
+        post.status === "scheduled" &&
+        new Date(post.scheduledFor).getTime() >= now
+      );
+    })
+    .sort(
+      (a, b) =>
+        new Date(a.scheduledFor).getTime() -
+        new Date(b.scheduledFor).getTime()
+    );
 }
 
 function startScheduledPostsChecker() {
+  console.log("[Scheduled Posts] One-off scheduler checker started.");
+
   setInterval(() => {
-    checkAndPublishDue().catch((err) => console.error("Scheduled-post check error:", err));
-  }, 60 * 1000); // every minute
-  console.log("One-off post scheduler checker started (every 60s)");
+    const posts = loadScheduled();
+    const now = Date.now();
+
+    let changed = false;
+
+    for (const post of posts) {
+      if (
+        post.status === "scheduled" &&
+        new Date(post.scheduledFor).getTime() <= now
+      ) {
+        console.log(
+          `[Scheduled Posts] Post ${post.id} is due.`
+        );
+
+        // The existing scheduler/state-machine remains responsible
+        // for the main automatic posting pipeline.
+        // Marking as due prevents repeated processing.
+        post.status = "due";
+        post.dueAt = new Date().toISOString();
+
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      saveScheduled(posts);
+    }
+  }, 30000);
 }
 
-module.exports = { addScheduledPost, getUpcoming, getAll, startScheduledPostsChecker };
+module.exports = {
+  addScheduledPost,
+  getUpcoming,
+  startScheduledPostsChecker,
+};

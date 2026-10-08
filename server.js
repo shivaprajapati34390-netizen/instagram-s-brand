@@ -41,6 +41,52 @@ function saveImageAndGetUrl(base64, mimeType) {
   const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
   return `${baseUrl}/generated/${filename}`;
 }
+// ---------- Delete one history entry ----------
+app.delete("/api/history/:timestamp", (req, res) => {
+  try {
+    const timestamp = decodeURIComponent(req.params.timestamp);
+    const logFile = path.join(__dirname, "post-log.json");
+
+    if (!fs.existsSync(logFile)) {
+      return res.status(404).json({
+        success: false,
+        error: "History file not found"
+      });
+    }
+
+    const log = JSON.parse(fs.readFileSync(logFile, "utf-8"));
+
+    const filtered = log.filter(
+      (entry) => entry.timestamp !== timestamp
+    );
+
+    if (filtered.length === log.length) {
+      return res.status(404).json({
+        success: false,
+        error: "History entry not found"
+      });
+    }
+
+    fs.writeFileSync(
+      logFile,
+      JSON.stringify(filtered, null, 2),
+      "utf-8"
+    );
+
+    res.json({
+      success: true,
+      deletedTimestamp: timestamp
+    });
+
+  } catch (err) {
+    console.error("[History Delete]", err);
+
+    res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
 
 // ---------- Overview / status ----------
 app.get("/api/status", (req, res) => {

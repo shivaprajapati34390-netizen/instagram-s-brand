@@ -368,26 +368,74 @@
     }
 
     function renderActivity(posts) {
-        const recent = document.getElementById('recentActivity');
-        const full = document.getElementById('activityList');
-        if (!posts.length) {
-            recent.innerHTML = '<div class="empty">No activity yet — the agent runs automatically, or click "Run Agent Now".</div>';
-            full.innerHTML = recent.innerHTML;
-            return;
-        }
-        const html = posts.map(p => `
-            <div class="activity">
-                <div class="activity-icon">${p.imageUrl ? `<img src="${p.imageUrl}">` : '◈'}</div>
-                <div class="activity-text">
-                    ${p.productName || 'Generation'} ${p.brand ? '· ' + p.brand : ''}
-                    <span class="badge ${statusBadgeClass(p.status)}" style="margin-left:6px;">${p.status}</span>
-                    <div class="activity-time">${timeAgo(p.timestamp)}</div>
+    const recent = document.getElementById('recentActivity');
+    const full = document.getElementById('activityList');
+
+    if (!posts.length) {
+        recent.innerHTML = '<div class="empty">No activity yet — the agent runs automatically, or click "Run Agent Now".</div>';
+        full.innerHTML = recent.innerHTML;
+        return;
+    }
+
+    const html = posts.map(p => `
+        <div class="activity">
+            <div class="activity-icon">
+                ${p.imageUrl ? `<img src="${p.imageUrl}">` : '◈'}
+            </div>
+
+            <div class="activity-text" style="flex:1;">
+                ${p.productName || 'Generation'}
+                ${p.brand ? '· ' + p.brand : ''}
+
+                <span class="badge ${statusBadgeClass(p.status)}" style="margin-left:6px;">
+                    ${p.status}
+                </span>
+
+                <div class="activity-time">
+                    ${timeAgo(p.timestamp)}
                 </div>
             </div>
-        `).join('');
-        recent.innerHTML = html;
-        full.innerHTML = html;
+
+            <button
+                class="btn btn-danger"
+                style="padding:6px 10px;font-size:10px;white-space:nowrap;"
+                onclick="deleteHistory('${encodeURIComponent(p.timestamp)}')"
+                title="Delete this history entry">
+                🗑 Delete
+            </button>
+        </div>
+    `).join('');
+
+    recent.innerHTML = html;
+    full.innerHTML = html;
+}
+async function deleteHistory(encodedTimestamp) {
+    const timestamp = decodeURIComponent(encodedTimestamp);
+
+    if (!confirm('Delete this automation history entry?')) {
+        return;
     }
+
+    try {
+        const response = await fetch(
+            `/api/history/${encodeURIComponent(timestamp)}`,
+            {
+                method: 'DELETE'
+            }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Delete failed');
+        }
+
+        await loadStatus();
+
+    } catch (error) {
+        alert('Failed to delete history: ' + error.message);
+    }
+}
 
     function renderOverviewSchedule(scheduled) {
         const list = document.getElementById('scheduleList');
