@@ -19,6 +19,7 @@ const { generateCustomImage } = require("./gemini-image");
 const { publishPost, isConfigured } = require("./instagram");
 const { startScheduler, runAutomationCycle, loadLog, getNextPostTime, POSTING_TIMES } = require("./scheduler");
 const { addScheduledPost, getUpcoming, startScheduledPostsChecker } = require("./scheduled-posts");
+const { getPostedProducts } = require("./database");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -179,8 +180,20 @@ app.get("/api/schedule", (req, res) => {
   res.json({ scheduled: getUpcoming() });
 });
 
+
 app.listen(PORT, () => {
-  console.log(`S-Brand Instagram Autopilot running on http://localhost:${PORT}`);
-  startScheduler();               // recurring 3x/day auto-agent
-  startScheduledPostsChecker();   // one-off manually scheduled posts
+  console.log(`S-Brand Instagram Autopilot running on port ${PORT}`);
+
+  getPostedProducts()
+    .then((products) => {
+      console.log(
+        `[MongoDB] Startup check successful. ${products.length} product records loaded.`
+      );
+    })
+    .catch((err) => {
+      console.error("[MongoDB] Startup check failed:", err.message);
+    });
+
+  startScheduler();
+  startScheduledPostsChecker();
 });

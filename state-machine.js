@@ -355,22 +355,22 @@ async function runStateMachine({
 
     if (post.product) {
 
-      markProductAsPosted(
-        post.product
-      );
+  await markProductAsPosted(
+    post.product
+  );
 
-      logState(
-        state,
-        `Product marked as posted: ${post.productName}`
-      );
+  logState(
+    state,
+    `Product marked as posted: ${post.productName}`
+  );
 
-    } else {
+} else {
 
-      console.warn(
-        "[FSM] Product data missing — could not save posted-product history"
-      );
+  console.warn(
+    "[FSM] Product data missing — could not save posted-product history"
+  );
 
-    }
+}
 
 
     // ========================================================

@@ -16,5 +16,23 @@
     "price": 2999,
     "productUrl": "https://gritstones.com/products/off-white-men-double-pocket-heavy-winter-jacket",
     "postedAt": "2026-10-07T05:24:44.351Z"
+  },
+  {
+    "key": "product:offduty india:stripe slim fit ribbed henley t shirt",
+    "productId": null,
+    "productName": "Stripe Slim Fit Ribbed Henley T-shirt",
+    "brand": "Offduty India",
+    "price": 950,
+    "productUrl": "https://offduty.in/products/stripe-slim-fit-ribbed-henley-t-shirt",
+    "postedAt": "2026-10-08T11:24:41.877Z"
+  },
+  {
+    "key": "product:fugazee:olive parker ribbed henley tshirt",
+    "productId": null,
+    "productName": "Olive Parker Ribbed Henley Tshirt",
+    "brand": "Fugazee",
+    "price": 1199,
+    "productUrl": "https://fugazee.com/products/olive-parker-ribbed-henley-tshirt",
+    "postedAt": "2026-10-08T11:42:13.613Z"
   }
 ]
