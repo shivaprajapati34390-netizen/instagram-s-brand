@@ -1,5 +1,4 @@
-
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 
 require("dotenv").config();
@@ -13,17 +12,27 @@ const {
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
+const GEMINI_MODELS = (
+  process.env.GEMINI_MODELS ||
+  "gemini-2.5-flash"
+)
+  .split(",")
+  .map((model) => model.trim())
+  .filter(Boolean);
+
 const POSTED_PRODUCTS_FILE =
   process.env.POSTED_PRODUCTS_FILE ||
   path.join(__dirname, "posted-products.json");
 
 // ============================================================
-// POSTED PRODUCT MEMORY — MONGODB + LOCAL BACKUP
+// LOCAL BACKUP
 // ============================================================
 
 function loadLocalPostedProducts() {
   try {
-    if (!fs.existsSync(POSTED_PRODUCTS_FILE)) return [];
+    if (!fs.existsSync(POSTED_PRODUCTS_FILE)) {
+      return [];
+    }
 
     const data = fs
       .readFileSync(POSTED_PRODUCTS_FILE, "utf8")
@@ -46,20 +55,27 @@ function loadLocalPostedProducts() {
       "[S-Brand] Failed to read local history:",
       error.message
     );
+
     return [];
   }
 }
 
-/**
- * MongoDB is the source of truth.
- * If Atlas is unavailable, throw an error rather than risk
- * publishing products that have already been posted.
- */
+// ============================================================
+// MONGODB PRODUCT MEMORY
+// ============================================================
+
 async function loadPostedProducts() {
+  // MongoDB is the source of truth.
+  // If MongoDB is unavailable, stop rather than risk duplicates.
   let products = await getPostedProducts();
 
-  // One-time recovery/migration if Atlas is empty but the
-  // local JSON backup already contains history.
+  if (!Array.isArray(products)) {
+    throw new Error(
+      "MongoDB returned invalid product history."
+    );
+  }
+
+  // Recover local history if the database is empty.
   if (products.length === 0) {
     const localProducts = loadLocalPostedProducts();
 
@@ -76,32 +92,40 @@ async function loadPostedProducts() {
   return products;
 }
 
-/**
- * Save history to MongoDB first, then update the local backup.
- * MongoDB's unique key index prevents duplicate primary keys.
- */
 async function savePostedProducts(products) {
   if (!Array.isArray(products)) {
-    throw new Error("Posted products must be an array.");
+    throw new Error(
+      "Posted products must be an array."
+    );
   }
 
+  // Save to MongoDB first.
   await savePostedProductsToDb(products);
 
+  // Then update the local backup.
   try {
-    const tmpFile = `${POSTED_PRODUCTS_FILE}.tmp`;
-    const directory = path.dirname(POSTED_PRODUCTS_FILE);
+    const directory = path.dirname(
+      POSTED_PRODUCTS_FILE
+    );
 
-    fs.mkdirSync(directory, { recursive: true });
+    fs.mkdirSync(directory, {
+      recursive: true,
+    });
+
+    const tempFile =
+      `${POSTED_PRODUCTS_FILE}.tmp`;
 
     fs.writeFileSync(
-      tmpFile,
+      tempFile,
       JSON.stringify(products, null, 2),
       "utf8"
     );
 
-    fs.renameSync(tmpFile, POSTED_PRODUCTS_FILE);
+    fs.renameSync(
+      tempFile,
+      POSTED_PRODUCTS_FILE
+    );
   } catch (error) {
-    // MongoDB has already saved the records.
     console.warn(
       "[S-Brand] MongoDB saved history, but local backup failed:",
       error.message
@@ -110,7 +134,7 @@ async function savePostedProducts(products) {
 }
 
 // ============================================================
-// PRODUCT NORMALIZATION AND KEYS
+// PRODUCT NORMALIZATION
 // ============================================================
 
 function normalizeText(value) {
@@ -132,9 +156,17 @@ function normalizeUrl(value) {
 
 function getProductName(product) {
   return (
-    product.productName ||
-    product.title ||
-    product.name ||
+    product?.productName ||
+    product?.title ||
+    product?.name ||
+    ""
+  );
+}
+
+function getProductUrl(product) {
+  return (
+    product?.url ||
+    product?.productUrl ||
     ""
   );
 }
@@ -143,7 +175,9 @@ function getProductKey(product) {
   if (!product) return null;
 
   const brand = normalizeText(product.brand);
-  const name = normalizeText(getProductName(product));
+  const name = normalizeText(
+    getProductName(product)
+  );
 
   if (brand && name) {
     return `product:${brand}:${name}`;
@@ -158,10 +192,12 @@ function getProductKey(product) {
   }
 
   const url = normalizeUrl(
-    product.url || product.productUrl
+    getProductUrl(product)
   );
 
-  if (url) return `url:${url}`;
+  if (url) {
+    return `url:${url}`;
+  }
 
   return null;
 }
@@ -172,6 +208,7 @@ function getAllProductKeys(product) {
   if (!product) return keys;
 
   const primary = getProductKey(product);
+
   if (primary) keys.add(primary);
 
   if (product.id) {
@@ -179,18 +216,23 @@ function getAllProductKeys(product) {
   }
 
   if (product.productId) {
-    keys.add(`productId:${String(product.productId).trim()}`);
+    keys.add(
+      `productId:${String(product.productId).trim()}`
+    );
   }
 
   const rawUrl = String(
-    product.url || product.productUrl || ""
+    getProductUrl(product) || ""
   )
     .trim()
     .toLowerCase();
 
-  if (rawUrl) keys.add(`url:${rawUrl}`);
+  if (rawUrl) {
+    keys.add(`url:${rawUrl}`);
+  }
 
   const normalizedUrl = normalizeUrl(rawUrl);
+
   if (normalizedUrl) {
     keys.add(`url:${normalizedUrl}`);
   }
@@ -202,16 +244,28 @@ function buildPostedKeySet(postedProducts) {
   const keys = new Set();
 
   for (const entry of postedProducts) {
-    if (entry.key) keys.add(entry.key);
+    if (entry.key) {
+      keys.add(entry.key);
+    }
 
+    // Support older history record formats.
     const storedProduct = {
-      id: entry.productId,
+      id: entry.productId || entry.id,
+      productId: entry.productId,
       brand: entry.brand,
-      productName: entry.productName,
-      url: entry.productUrl,
+      productName:
+        entry.productName ||
+        entry.title ||
+        entry.name,
+      url:
+        entry.productUrl ||
+        entry.url ||
+        "",
     };
 
-    for (const key of getAllProductKeys(storedProduct)) {
+    for (const key of getAllProductKeys(
+      storedProduct
+    )) {
       keys.add(key);
     }
   }
@@ -221,7 +275,7 @@ function buildPostedKeySet(postedProducts) {
 
 // ============================================================
 // MARK PRODUCT AS POSTED
-// Call ONLY after Instagram confirms successful publication.
+// Call only after successful Instagram publication.
 // ============================================================
 
 async function markProductAsPosted(product) {
@@ -241,11 +295,16 @@ async function markProductAsPosted(product) {
     return;
   }
 
-  const postedProducts = await loadPostedProducts();
-  const postedKeys = buildPostedKeySet(postedProducts);
+  const postedProducts =
+    await loadPostedProducts();
 
-  const alreadyPosted = [...getAllProductKeys(product)].some(
-    (candidateKey) => postedKeys.has(candidateKey)
+  const postedKeys =
+    buildPostedKeySet(postedProducts);
+
+  const alreadyPosted = [
+    ...getAllProductKeys(product),
+  ].some((candidateKey) =>
+    postedKeys.has(candidateKey)
   );
 
   if (alreadyPosted) {
@@ -257,15 +316,23 @@ async function markProductAsPosted(product) {
 
   const record = {
     key,
-    productId: product.id || product.productId || null,
-    productName: getProductName(product) || null,
+    productId:
+      product.id ||
+      product.productId ||
+      null,
+    productName:
+      getProductName(product) || null,
     brand: product.brand || null,
-    price: product.price || null,
-    productUrl: product.url || product.productUrl || null,
+    price: product.price ?? null,
+    productUrl:
+      getProductUrl(product) || null,
     postedAt: new Date().toISOString(),
   };
 
-  await savePostedProducts([...postedProducts, record]);
+  await savePostedProducts([
+    ...postedProducts,
+    record,
+  ]);
 
   console.log(
     `[S-Brand] Product saved to MongoDB history: ${key}`
@@ -289,7 +356,10 @@ function pickWeeklyTopic() {
   const now = new Date();
 
   const weekNumber = Math.floor(
-    (now - new Date(now.getFullYear(), 0, 1)) /
+    (
+      now -
+      new Date(now.getFullYear(), 0, 1)
+    ) /
       (7 * 24 * 60 * 60 * 1000)
   );
 
@@ -299,41 +369,317 @@ function pickWeeklyTopic() {
 }
 
 // ============================================================
-// FIND FEATURED PRODUCT — CHECK MONGODB HISTORY
+// GEMINI API
+// ============================================================
+
+const sleep = (ms) =>
+  new Promise((resolve) =>
+    setTimeout(resolve, ms)
+  );
+
+function isRetryableStatus(status) {
+  return [
+    408,
+    429,
+    500,
+    502,
+    503,
+    504,
+  ].includes(status);
+}
+
+async function callGemini(
+  prompt,
+  maxTokens = 1200
+) {
+  if (!GEMINI_API_KEY) {
+    throw new Error(
+      "GEMINI_API_KEY is missing from environment variables."
+    );
+  }
+
+  let lastError = null;
+
+  for (const model of GEMINI_MODELS) {
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+    for (
+      let attempt = 1;
+      attempt <= 3;
+      attempt++
+    ) {
+      try {
+        console.log(
+          `[Gemini] ${model} â†’ Attempt ${attempt}/3`
+        );
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY,
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: prompt,
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              maxOutputTokens: maxTokens,
+              temperature: 0.7,
+            },
+          }),
+        });
+
+        const responseText =
+          await response.text();
+
+        let data;
+
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          data = {};
+        }
+
+        if (response.ok) {
+          const result =
+            data.candidates?.[0]?.content?.parts
+              ?.map((part) => part.text || "")
+              .join("")
+              .trim();
+
+          if (!result) {
+            lastError = new Error(
+              `Gemini ${model} returned no text.`
+            );
+            break;
+          }
+
+          console.log(
+            `[Gemini] ${model} â†’ SUCCESS`
+          );
+
+          return result;
+        }
+
+        lastError = new Error(
+          `Gemini ${model} API error ${response.status}: ${responseText}`
+        );
+
+        if (
+          !isRetryableStatus(response.status)
+        ) {
+          // Invalid model, key or request: try next model.
+          break;
+        }
+
+        if (attempt < 3) {
+          const delay =
+            3000 * Math.pow(2, attempt - 1);
+
+          console.warn(
+            `[Gemini] HTTP ${response.status}. Retrying in ${delay / 1000}s.`
+          );
+
+          await sleep(delay);
+        }
+      } catch (error) {
+        lastError = error;
+
+        if (attempt < 3) {
+          const delay =
+            3000 * Math.pow(2, attempt - 1);
+
+          console.warn(
+            `[Gemini] Request failed. Retrying in ${delay / 1000}s.`
+          );
+
+          await sleep(delay);
+        }
+      }
+    }
+
+    console.warn(
+      `[Gemini] Model ${model} failed. Trying next fallback.`
+    );
+  }
+
+  throw (
+    lastError ||
+    new Error("All configured Gemini models failed.")
+  );
+}
+
+// ============================================================
+// AUTOMATIC CAPTION GENERATOR
+// ============================================================
+
+async function generateCaptionAndHashtags(
+  product,
+  topic
+) {
+  const productName =
+    getProductName(product) ||
+    "Featured fashion product";
+
+  const brand =
+    product.brand ||
+    "an Indian fashion brand";
+
+  const price =
+    product.price !== undefined &&
+    product.price !== null
+      ? `â‚¹${product.price}`
+      : "check the product page for price";
+
+  const prompt = `You are writing an Instagram caption for S-Brand, a platform that compares prices and stock across 17+ Indian D2C fashion brands.
+
+Featured product: "${productName}" from ${brand}, priced at ${price}.
+Trend angle: ${topic}
+
+Write:
+1. A short, punchy Instagram caption (2-3 sentences maximum), casual Gen-Z-friendly Indian English.
+2. A call to action inviting people to check "link in bio" to compare.
+3. 15-18 relevant hashtags mixing broad, niche, #sbrand, and India-specific tags.
+
+Return ONLY valid JSON.
+Do not use markdown fences or add an explanation.
+
+Use exactly this structure:
+{
+  "caption": "your caption",
+  "cta": "your call to action",
+  "hashtags": ["#tag1", "#tag2", "#tag3"]
+}`;
+
+  const rawText = await callGemini(
+    prompt,
+    1200
+  );
+
+  try {
+    let cleaned = rawText
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+
+    if (
+      start !== -1 &&
+      end !== -1 &&
+      end > start
+    ) {
+      cleaned = cleaned.slice(
+        start,
+        end + 1
+      );
+    }
+
+    const parsed = JSON.parse(cleaned);
+
+    if (
+      typeof parsed.caption !== "string" ||
+      typeof parsed.cta !== "string" ||
+      !Array.isArray(parsed.hashtags)
+    ) {
+      throw new Error(
+        "Gemini returned incomplete caption JSON."
+      );
+    }
+
+    return {
+      caption: parsed.caption.trim(),
+      cta: parsed.cta.trim(),
+      hashtags: parsed.hashtags
+        .map((tag) =>
+          String(tag).trim()
+        )
+        .filter(Boolean)
+        .map((tag) =>
+          tag.startsWith("#")
+            ? tag
+            : `#${tag}`
+        ),
+    };
+  } catch (error) {
+    console.error(
+      "[Gemini] Caption JSON parsing failed:",
+      error.message
+    );
+
+    console.error(
+      "[Gemini] Raw response:",
+      rawText
+    );
+
+    throw new Error(
+      "Could not parse Gemini caption response as JSON."
+    );
+  }
+}
+
+// ============================================================
+// FIND FEATURED PRODUCT â€” MONGODB DUPLICATE CHECK
 // ============================================================
 
 async function findFeaturedProduct(topic) {
-  const results = await searchAllBrands(topic);
+  const results =
+    await searchAllBrands(topic);
 
   const inStock = results.filter(
-    (product) => product.stockStatus === "in"
+    (product) =>
+      product &&
+      product.stockStatus === "in"
   );
 
   if (inStock.length === 0) {
     throw new Error(
-      `No in-stock products found for topic "${topic}"`
+      `No in-stock products found for topic "${topic}".`
     );
   }
 
-  // This is asynchronous because history comes from MongoDB.
-  const postedProducts = await loadPostedProducts();
-  const postedKeys = buildPostedKeySet(postedProducts);
+  const postedProducts =
+    await loadPostedProducts();
+
+  const postedKeys =
+    buildPostedKeySet(postedProducts);
 
   const seenThisRun = new Set();
   const unusedProducts = [];
 
   for (const product of inStock) {
-    const keys = [...getAllProductKeys(product)];
+    const keys = [
+      ...getAllProductKeys(product),
+    ];
 
     if (keys.length === 0) continue;
 
-    if (keys.some((key) => postedKeys.has(key))) {
+    if (
+      keys.some((key) =>
+        postedKeys.has(key)
+      )
+    ) {
       continue;
     }
 
-    const primary = getProductKey(product);
+    const primary =
+      getProductKey(product);
 
-    if (!primary || seenThisRun.has(primary)) {
+    if (
+      !primary ||
+      seenThisRun.has(primary)
+    ) {
       continue;
     }
 
@@ -365,11 +711,13 @@ async function findFeaturedProduct(topic) {
       (a.availableSizes?.length || 0)
   );
 
-  const selectedProduct = unusedProducts[0];
+  const selectedProduct =
+    unusedProducts[0];
 
   console.log(
     `[S-Brand] NEW PRODUCT SELECTED: ${
-      getProductName(selectedProduct) || "Unknown"
+      getProductName(selectedProduct) ||
+      "Unknown"
     }`
   );
 
@@ -381,238 +729,122 @@ async function findFeaturedProduct(topic) {
 }
 
 // ============================================================
-// GEMINI API
+// AUTOMATIC POST CONTENT PIPELINE
 // ============================================================
 
-const sleep = (ms) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
-async function callGemini(prompt, maxTokens = 1200) {
-  if (!GEMINI_API_KEY) {
-    throw new Error(
-      "GEMINI_API_KEY is missing from your .env file"
-    );
-  }
-
-  const models = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-  ];
-
-  let lastError = null;
-
-  for (const model of models) {
-    const url =
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        console.log(
-          `[Gemini] ${model} → Attempt ${attempt}/3`
-        );
-
-        const response = await fetch(
-          `${url}?key=${GEMINI_API_KEY}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [{ text: prompt }],
-                },
-              ],
-              generationConfig: {
-                maxOutputTokens: maxTokens,
-                temperature: 0.7,
-              },
-            }),
-          }
-        );
-
-        const responseText = await response.text();
-
-        if (response.ok) {
-          const data = JSON.parse(responseText);
-
-          const result =
-            data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-          if (!result) {
-            throw new Error(
-              `Gemini ${model} returned an empty response`
-            );
-          }
-
-          console.log(`[Gemini] ${model} → SUCCESS`);
-
-          return result.trim();
-        }
-
-        lastError = new Error(
-          `Gemini ${model} API error ${response.status}: ${responseText}`
-        );
-
-        if ([429, 500, 503].includes(response.status)) {
-          if (attempt < 3) {
-            const delay =
-              5000 * Math.pow(2, attempt - 1);
-
-            console.log(
-              `[Gemini] ${response.status}. Retrying in ${delay / 1000}s...`
-            );
-
-            await sleep(delay);
-            continue;
-          }
-
-          console.log(
-            `[Gemini] ${model} failed after 3 attempts.`
-          );
-          break;
-        }
-
-        lastError.permanent = true;
-        throw lastError;
-      } catch (error) {
-        lastError = error;
-
-        if (error.permanent) {
-          console.log(
-            `[Gemini] ${model} permanent error. Skipping retries.`
-          );
-          break;
-        }
-
-        if (attempt < 3) {
-          const delay =
-            5000 * Math.pow(2, attempt - 1);
-
-          console.log(
-            `[Gemini] Request failed. Retrying in ${delay / 1000}s...`
-          );
-
-          await sleep(delay);
-        }
-      }
-    }
-
-    console.log(
-      `[Gemini] Trying fallback model: ${
-        models[models.indexOf(model) + 1] || "none"
-      }`
-    );
-  }
-
-  throw lastError || new Error("All Gemini models failed");
-}
-
-// ============================================================
-// AUTOMATIC CAPTION GENERATOR
-// ============================================================
-
-async function generateCaptionAndHashtags(product, topic) {
-  const prompt = `You are writing an Instagram caption for S-Brand, a platform that compares live price and stock across 17+ Indian D2C fashion brands.
-
-Featured product this week: "${product.productName}" from ${product.brand}, priced at ₹${product.price}.
-Trend angle: ${topic}
-
-Write:
-1. A short, punchy Instagram caption (2-3 sentences max), casual Gen-Z-friendly Indian English.
-2. A line inviting people to check "link in bio" to compare.
-3. 15-18 Instagram hashtags (broad + niche + #sbrand + India-specific).
-
-IMPORTANT:
-Return ONLY valid JSON.
-Do NOT use markdown code fences.
-Do NOT add any explanation before or after the JSON.
-
-Use exactly this structure:
-{
-  "caption": "your caption",
-  "cta": "your call to action",
-  "hashtags": ["#tag1", "#tag2", "#tag3"]
-}`;
-
-  const text = await callGemini(prompt);
-
-  try {
-    let cleaned = text
-      .trim()
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/\s*```$/i, "")
-      .trim();
-
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-
-    if (start !== -1 && end !== -1 && end > start) {
-      cleaned = cleaned.slice(start, end + 1);
-    }
-
-    const parsed = JSON.parse(cleaned);
-
-    if (
-      !parsed.caption ||
-      !parsed.cta ||
-      !Array.isArray(parsed.hashtags)
-    ) {
-      throw new Error(
-        "Gemini returned incomplete caption JSON"
-      );
-    }
-
-    return {
-      caption: parsed.caption.trim(),
-      cta: parsed.cta.trim(),
-      hashtags: parsed.hashtags
-        .map((tag) => String(tag).trim())
-        .filter(Boolean),
-    };
-  } catch (error) {
-    console.log(
-      "[Gemini] Caption JSON parsing failed."
-    );
-    console.log("[Gemini] Raw response:", text);
-
-    throw new Error(
-      "Could not parse Gemini caption response as JSON"
-    );
-  }
-}
-
-// ============================================================
-// AUTO AGENT PIPELINE
-// ============================================================
 
 async function generateWeeklyPost(useAiImage = false) {
-  const { generateTrendImage } = require("./gemini-image");
+  const preferredTopic = pickWeeklyTopic();
 
-  const topic = pickWeeklyTopic();
+  const topicsToTry = [
+    preferredTopic,
+    ...TREND_SEED_TOPICS.filter(
+      (item) => item !== preferredTopic
+    ),
+  ];
 
-  console.log(`[S-Brand] Weekly topic: ${topic}`);
+  let topic = null;
+  let product = null;
+  let lastError = null;
 
-  const product = await findFeaturedProduct(topic);
+  // Try the preferred topic first, then other topics.
+  for (const candidateTopic of topicsToTry) {
+    console.log(
+      `[S-Brand] Trying topic: ${candidateTopic}`
+    );
 
-  const content = await generateCaptionAndHashtags(
-    product,
-    topic
+    try {
+      const selectedProduct =
+        await findFeaturedProduct(candidateTopic);
+
+      if (selectedProduct) {
+        product = selectedProduct;
+        topic = candidateTopic;
+        break;
+      }
+    } catch (error) {
+      lastError = error;
+
+      const message = String(
+        error?.message || error
+      );
+
+      const isDatabaseError =
+        /MONGODB_URI|MongoDB|MongoServer|MongoNetwork|MongoTopology|ECONNREFUSED|ENOTFOUND|querySrv|authentication failed/i.test(
+          message
+        );
+
+      if (isDatabaseError) {
+        console.error(
+          "[S-Brand] Database error. Stopping product selection:",
+          message
+        );
+        throw error;
+      }
+
+      console.warn(
+        `[S-Brand] Topic "${candidateTopic}" unavailable: ${message}`
+      );
+    }
+  }
+
+  if (!product) {
+    throw new Error(
+      "No unused in-stock products found across any trend topic." +
+        (lastError
+          ? ` Last error: ${lastError.message}`
+          : "")
+    );
+  }
+
+  console.log(
+    `[S-Brand] Selected topic: ${topic}`
   );
 
+  console.log(
+    `[S-Brand] Selected product: ${
+      getProductName(product) || "Unknown product"
+    }`
+  );
+
+  // Generate caption, CTA, and hashtags.
+  const content =
+    await generateCaptionAndHashtags(
+      product,
+      topic
+    );
+
+  // Use the product photo by default.
   let imageData = {
-    imageUrl: product.image,
+    imageUrl:
+      product.image ||
+      product.imageUrl ||
+      null,
     aiGenerated: false,
   };
 
+  // Optionally generate an AI image.
   if (useAiImage) {
     try {
-      const aiImage = await generateTrendImage(
-        product,
-        topic
-      );
+      const {
+        generateTrendImage,
+      } = require("./gemini-image");
+
+      const aiImage =
+        await generateTrendImage(
+          product,
+          topic
+        );
+
+      if (
+        !aiImage?.base64 ||
+        !aiImage?.mimeType
+      ) {
+        throw new Error(
+          "Image generator returned incomplete image data."
+        );
+      }
 
       imageData = {
         imageBase64: aiImage.base64,
@@ -621,42 +853,65 @@ async function generateWeeklyPost(useAiImage = false) {
       };
     } catch (error) {
       console.warn(
-        "Gemini image generation failed; using product photo:",
+        "[S-Brand] Gemini image generation failed; using product photo:",
         error.message
       );
 
       imageData = {
-        imageUrl: product.image,
+        imageUrl:
+          product.image ||
+          product.imageUrl ||
+          null,
         aiGenerated: false,
       };
     }
   }
 
+  const hashtags = (
+    Array.isArray(content.hashtags)
+      ? content.hashtags
+      : []
+  )
+    .map(
+      (tag) =>
+        `#${String(tag).replace(/^#+/, "")}`
+    )
+    .join(" ");
+
+  const fullCaptionText = [
+    content.caption,
+    content.cta,
+    hashtags,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  if (!fullCaptionText.trim()) {
+    throw new Error(
+      "Caption generation returned empty content."
+    );
+  }
+
   return {
     ...imageData,
 
-    productName: product.productName,
-    brand: product.brand,
-    price: product.price,
-    productUrl: product.url,
+    productName: getProductName(product),
+    brand: product.brand || null,
+    price: product.price ?? null,
+    productUrl: getProductUrl(product) || null,
 
-    // Used by state-machine.js after successful publication.
+    topic,
     product,
 
     caption: content.caption,
     cta: content.cta,
     hashtags: content.hashtags,
 
-    fullCaptionText:
-      `${content.caption}\n\n` +
-      `${content.cta}\n\n` +
-      content.hashtags
-        .map((tag) => `#${tag.replace(/^#/, "")}`)
-        .join(" "),
+    fullCaptionText,
   };
 }
 
-// ============================================================
+
 // MANUAL DASHBOARD AI CONTENT
 // ============================================================
 
@@ -669,11 +924,15 @@ async function generateCustomCaption(
 
 Product: ${product || "a trending fashion item"}
 Style: ${style || "Streetwear"}
-${extraPrompt ? `Additional instructions: ${extraPrompt}` : ""}
+${
+  extraPrompt
+    ? `Additional instructions: ${extraPrompt}`
+    : ""
+}
 
-Write a ready-to-post Instagram caption (2-4 sentences), a line inviting people to compare on S-Brand (link in bio), then 15-18 hashtags (broad + niche + #sbrand + India-specific).
+Write a ready-to-post Instagram caption (2-4 sentences), a line inviting people to compare on S-Brand (link in bio), then 15-18 hashtags (broad, niche, #sbrand, and India-specific).
 
-Respond with ONLY the final caption text, fully formatted, ready to paste into Instagram — no JSON, no explanation.`;
+Respond with ONLY the final caption text, fully formatted and ready to paste into Instagram. No JSON and no explanation.`;
 
   return callGemini(prompt, 500);
 }
@@ -688,7 +947,6 @@ module.exports = {
   findFeaturedProduct,
   generateCustomCaption,
 
-  // Product memory functions
   loadPostedProducts,
   savePostedProducts,
   getProductKey,
