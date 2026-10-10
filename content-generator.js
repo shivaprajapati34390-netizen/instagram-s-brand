@@ -14,7 +14,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const GEMINI_MODELS = (
   process.env.GEMINI_MODELS ||
-  "gemini-2.5-flash"
+  "gemini-3.8-flash"
 )
   .split(",")
   .map((model) => model.trim())
