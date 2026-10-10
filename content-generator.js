@@ -432,7 +432,6 @@ async function callGemini(
             ],
             generationConfig: {
               maxOutputTokens: maxTokens,
-              temperature: 0.7,
             },
           }),
         });
